@@ -8,7 +8,7 @@ from utils import DYSProjector, rk4_step, ControlNet
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-n_agent = 5
+n_agent = globals().get("n_agent", 5)
 
 m = 0.5    # mass 
 g = 1.0    # normalised gravity 
@@ -134,20 +134,20 @@ def construct_cbf_constraints(z, centers, r_obs, eps):
     d_cbf = torch.cat(d_list, dim=1)   # (B, N·n_obs, 1)
     return K_cbf, d_cbf
 
+def sample_initial_condition(batch_size=64, z0_std=0.02):
+    if n_agent == 5:
+        x_min, x_max = 1.1, 1.9
+    else:
+        x_min, x_max = 0.2, 2.8
 
-def sample_initial_condition(batch_size=64, z0_std=0.04):
-    """Agents equally spaced on a line at z = 1, hovering (zero vel / rates)."""
-    x_min, x_max = 1.1, 1.9
     x_positions = torch.linspace(x_min, x_max, n_agent, device=device)
 
-    z0      = torch.zeros(batch_size, STATE_DIM, device=device)
+    z0 = torch.zeros(batch_size, STATE_DIM, device=device)
     z0_view = z0.view(batch_size, n_agent, 12)
 
-    z0_view[:, :, 0] = x_positions   # x
-    z0_view[:, :, 1] = -0.5          # y
-    z0_view[:, :, 2] = 1.0           # z
-
-    # Small xy perturbations; angles / velocities / rates stay zero (hover eq.)
+    z0_view[:, :, 0] = x_positions
+    z0_view[:, :, 1] = -0.5
+    z0_view[:, :, 2] = 1.0
     z0_view[:, :, :2] += z0_std * torch.randn(batch_size, n_agent, 2, device=device)
     return z0
 
@@ -288,6 +288,7 @@ def plot_trajectory(traj, obstacle_centers, obstacle_radius, p_target, title="Qu
     ax.set_xlim(-0.5, 3.5)
     ax.set_ylim(-1, 4)
     ax.set_zlim(0, 3)
+    ax.view_init(azim=45)
 
     ax2.set_xlabel('X'); ax2.set_ylabel('Y')
     ax2.set_title("Bird's-eye view")

@@ -13,7 +13,7 @@ import argparse
 
 # parse args
 parser = argparse.ArgumentParser()
-parser.add_argument("--problem", choices=['double_integrator_single', "double_integrator_multi", "single_integrator_swarm", "quadcopter_multi"])
+parser.add_argument("--problem", choices=['double_integrator_single', "double_integrator_multi", "single_integrator_swarm", "quadcopter_multi", "quadcopter_swarm"])
 parser.add_argument("--epochs", type=int, default=1000)
 parser.add_argument("--lr", type=float, default=0.001)
 parser.add_argument("--lr_decay", type=int, default=600)
@@ -417,28 +417,64 @@ elif problem == "single_integrator_swarm":
     plt.tight_layout()
     plt.savefig("training_curve.png", bbox_inches="tight", dpi=400)
 
-elif problem == "quadcopter_multi":
-    from quadcopter_multi import n_agent, m, g, T_hover, STATE_DIM, CONTROL_DIM, split_state, thrust_direction, f, lagrangian, G, barrier_function, evaluate_barriers, psi1_function, evaluate_psi1, construct_cbf_constraints, sample_initial_condition, compute_loss, plot_trajectory
-    
-    T = 10.0
-    dt = 0.2
-    num_steps = int(T / dt)
-    
-    obstacle_center_1 = torch.tensor([0.63, 1.0, 1.0]).view(1, 3).to(device)
-    obstacle_center_2 = torch.tensor([1.5, 2.5, 0.8]).view(1, 3).to(device)
-    obstacle_center_3 = torch.tensor([2.37, 1.0, 1.0]).view(1, 3).to(device)
-    obstacle_centers = [obstacle_center_1, obstacle_center_2, obstacle_center_3]
-    obstacle_radius = 0.35
-    eps_safe = 0.15
-    
-    p_target     = torch.zeros(n_agent, 3, device=device)
-    x_min, x_max = 1.1, 1.9
-    x_positions = torch.linspace(x_min, x_max, n_agent, device=device)
+elif problem == "quadcopter_multi" or problem == "quadcopter_swarm":
+    if problem == "quadcopter_multi":
+        import importlib
+        import quadcopter_multi
+        quadcopter_multi.n_agent = 5
+        importlib.reload(quadcopter_multi)
 
-    p_target[:, 0] = x_positions   
-    p_target[:, 1] = 3.5          
-    p_target[:, 2] = 1.0             
+        from quadcopter_multi import n_agent, m, g, T_hover, STATE_DIM, CONTROL_DIM, split_state, thrust_direction, f, lagrangian, G, barrier_function, evaluate_barriers, psi1_function, evaluate_psi1, construct_cbf_constraints, sample_initial_condition, compute_loss, plot_trajectory
     
+        T = 10.0
+        dt = 0.2
+        num_steps = int(T / dt)
+        
+        obstacle_center_1 = torch.tensor([0.63, 1.0, 1.0]).view(1, 3).to(device)
+        obstacle_center_2 = torch.tensor([1.5, 2.5, 0.8]).view(1, 3).to(device)
+        obstacle_center_3 = torch.tensor([2.37, 1.0, 1.0]).view(1, 3).to(device)
+        obstacle_centers = [obstacle_center_1, obstacle_center_2, obstacle_center_3]
+        obstacle_radius = 0.35
+        eps_safe = 0.15
+        
+        p_target     = torch.zeros(n_agent, 3, device=device)
+        x_min, x_max = 1.1, 1.9
+        x_positions = torch.linspace(x_min, x_max, n_agent, device=device)
+
+        p_target[:, 0] = x_positions   
+        p_target[:, 1] = 3.5          
+        p_target[:, 2] = 1.0          
+        alpha_terminal_final = 2e2
+        z0_std = 4e-2
+        
+    elif problem == "quadcopter_swarm":
+        import importlib
+        import quadcopter_multi
+        quadcopter_multi.n_agent = 30
+        importlib.reload(quadcopter_multi)
+
+        from quadcopter_multi import n_agent, m, g, T_hover, STATE_DIM, CONTROL_DIM, split_state, thrust_direction, f, lagrangian, G, barrier_function, evaluate_barriers, psi1_function, evaluate_psi1, construct_cbf_constraints, sample_initial_condition, compute_loss, plot_trajectory
+        
+        T = 10.0
+        dt = 0.2
+        num_steps = int(T / dt)
+        
+        obstacle_center_1 = torch.tensor([0.63, 1.0, 1.0]).view(1, 3).to(device)
+        obstacle_center_2 = torch.tensor([1.5, 2.5, 0.8]).view(1, 3).to(device)
+        obstacle_center_3 = torch.tensor([2.37, 1.0, 1.0]).view(1, 3).to(device)
+        obstacle_centers = [obstacle_center_1, obstacle_center_2, obstacle_center_3]
+        obstacle_radius = 0.35
+        eps_safe = 0.15
+
+        p_target     = torch.zeros(n_agent, 3, device=device)
+        x_min, x_max = 0.2, 2.8
+        x_positions = torch.linspace(x_min, x_max, n_agent, device=device)
+        p_target[:, 0] = x_positions   
+        p_target[:, 1] = 3.5          
+        p_target[:, 2] = 1.5 
+        alpha_terminal_final = 5e2
+        z0_std = 2e-2
+        
     # Cost weights
     alpha_running = 1
     alpha_terminal = 2e1
@@ -448,12 +484,11 @@ elif problem == "quadcopter_multi":
     
     # Training params
     log_every = 1
-    z0_std = 4e-2
     batch_size = 32
     plot_freq = 50
     
     # Initialize network and optimizer
-    net = ControlNet(input_dim=61, hidden_dim=hidden_dim, output_dim=20, n_blocks=n_blocks).to(device)
+    net = ControlNet(input_dim=STATE_DIM + 1, hidden_dim=hidden_dim, output_dim=CONTROL_DIM, n_blocks=n_blocks).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
     proj = DYSProjector().to(device)
     print('Number of parameters in control net:', sum(p.numel() for p in net.parameters()))
@@ -484,7 +519,7 @@ elif problem == "quadcopter_multi":
         optimizer.zero_grad()
 
         z0_sample = sample_initial_condition(batch_size, z0_std)
-        assert z0_sample.shape == (batch_size, 60)
+        assert z0_sample.shape == (batch_size, STATE_DIM)
 
         total_cost, running_cost, terminal_cost, isprojected, n_iters_array, max_res_norm_array, barrier_value_array, traj = compute_loss(
             u_fn, z0_sample, num_steps, f, p_target, obstacle_centers, obstacle_radius, eps_safe,
@@ -531,7 +566,7 @@ elif problem == "quadcopter_multi":
                           obstacle_radius, p_target, eps_safe=eps_safe)
 
         if epoch % 20 == 0:
-            if alpha_terminal <= 2e2:
+            if alpha_terminal <= alpha_terminal_final:
                 alpha_terminal += 5
                 print("new alpha_terminal: ", alpha_terminal)
         if epoch % lr_decay == 0:  # 800
@@ -556,6 +591,5 @@ elif problem == "quadcopter_multi":
 
     plt.tight_layout()
     plt.savefig("training_curve.png", bbox_inches="tight", dpi=400)
-    
     
     

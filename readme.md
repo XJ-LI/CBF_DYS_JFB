@@ -9,4 +9,6 @@ python train.py --problem single_integrator_swarm   --epochs 3500 --lr_decay 800
 
 python train.py --problem quadcopter_multi   --epochs 2800 --lr_decay 600 --hidden_dim 128
 
+python train.py --problem quadcopter_swarm  --epochs 4200 --lr_decay 800 --hidden_dim 128 --n_blocks 4
+
 ```
