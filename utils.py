@@ -18,10 +18,11 @@ class DYSProjector(nn.Module):
         1. Run  z ← T(z)  to convergence inside torch.no_grad()
         2. Apply one final T WITH gradient  (JFB approximation)
     """
-    def __init__(self, alpha: float = 0.5, sv_thresh: float = 1e-6):
+    def __init__(self, alpha: float = 0.5, sv_thresh: float = 1e-6, grad_mode: str = "jfb"):
         super().__init__()
         self.alpha     = alpha
         self.sv_thresh = sv_thresh
+        self.grad_mode = grad_mode
     
     def _build_matrices(self, A, b):
         batch, m, n = A.shape
@@ -74,15 +75,29 @@ class DYSProjector(nn.Module):
         batch, m, n = A.shape
         N = 2 * n + m
         A_std, M, P_perp = self._build_matrices(A, b)
-        z = (z0 if z0 is not None
-             else torch.zeros(batch, N, dtype=u_nom.dtype, device=u_nom.device))
+        z = (z0 if z0 is not None else torch.zeros(batch, N, dtype=u_nom.dtype, device=u_nom.device))
         residuals = []
         converged = False
         k = 0
-        with torch.no_grad():
-            for k in range(max_iter - 1):
+        if self.grad_mode == "jfb":
+            with torch.no_grad():
+                for k in range(max_iter - 1):
+                    z_new = self.apply_T(z, u_nom, A_std, M, P_perp, b)
+                    res   = (z_new - z).abs().max().item()
+                    residuals.append(res)
+                    z = z_new
+                    if verbose:
+                        print(f"  iter {k+1:4d}  |  max residual = {res:.2e}")
+                    if res < tol:
+                        converged = True
+                        break
+            # JFB step
+            for _ in range(n_grad_iters):
+                z = self.apply_T(z, u_nom, A_std, M, P_perp, b)
+        elif self.grad_mode == "ad":
+            for k in range(max_iter):
                 z_new = self.apply_T(z, u_nom, A_std, M, P_perp, b)
-                res   = (z_new - z).abs().max().item()
+                res = (z_new - z).abs().max().item()
                 residuals.append(res)
                 z = z_new
                 if verbose:
@@ -90,9 +105,8 @@ class DYSProjector(nn.Module):
                 if res < tol:
                     converged = True
                     break
-        # JFB step
-        for _ in range(n_grad_iters):
-            z = self.apply_T(z, u_nom, A_std, M, P_perp, b)
+        else:
+            raise ValueError(f"Unknown grad_mode: {self.grad_mode}")
         z_star = z
         u_star = z_star @ M.T
         info = dict(iters=k + 1, converged=converged,
